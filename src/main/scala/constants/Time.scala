@@ -14,6 +14,6 @@ object Time {
   val DAYS_100: Int = 100 * A_DAY
   val A_YEAR: Int = 365 * A_DAY
 
-  val startTimestamp: Int = 1648494000
+  val startTimestamp: Int = 1690909199
   val endTimestamp: Int = startTimestamp + DAYS_100 // 1657136406
 }
