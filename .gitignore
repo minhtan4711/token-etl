@@ -1,0 +1,7 @@
+.bsp
+.idea
+.vscode
+.env
+.DS_Store
+project
+target
