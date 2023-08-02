@@ -3,6 +3,7 @@ package etl
 import common.Spark
 import common.Spark.{addCollectionNameToAddress, createKeyForTransfersCollection}
 import common.Web3.getBlockTimestampByTransactionHash
+import constants.Common.{start_block_number, end_block_number}
 import databases.Postgres.{connectionProperties, postgresSchema, postgresUrl}
 import databases.Arango.transfersCollectionSchema
 import org.apache.spark.sql.functions.{col, udf}
@@ -27,8 +28,8 @@ object TransferEnricher extends BaseEnricher {
   private val getTimestamp = udf(getBlockTimestampByTransactionHash _)
   private val createKey = udf(createKeyForTransfersCollection _)
 
-  private val minBlockNumber = 16461079
-  private val maxBlockNumber = 16535760
+  private val minBlockNumber = start_block_number
+  private val maxBlockNumber = end_block_number
   private val blockSize = 1000
 
   private def processBlockRange(startBlockNumber: Int, endBlockNumber: Int): Future[Unit] = Future {
@@ -86,7 +87,7 @@ object TransferEnricher extends BaseEnricher {
 
     Spark.saveDf(
       df = arangoTransferDf,
-      collectionName = "test_transfers",
+      collectionName = transfersCollection,
       collectionType = transfersCollectionType)
 
     logger.info(s"Finished processing block number $startBlockNumber to $endBlockNumber")
@@ -115,7 +116,7 @@ object TransferEnricher extends BaseEnricher {
     logger.info(s"Starting data fetch and enrichment at ${dateFormat.format(new Date())}")
     try {
       val batchSize = 5
-      val delayBetweenBatches = 10
+      val delayBetweenBatches = 5
 
       val batchedBlockNumbers = (minBlockNumber to maxBlockNumber by blockSize).grouped(batchSize)
 
