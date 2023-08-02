@@ -116,7 +116,7 @@ object TransferEnricher extends BaseEnricher {
     logger.info(s"Starting data fetch and enrichment at ${dateFormat.format(new Date())}")
     try {
       val batchSize = 5
-      val delayBetweenBatches = 5
+      val delayBetweenBatches = 10
 
       val batchedBlockNumbers = (minBlockNumber to maxBlockNumber by blockSize).grouped(batchSize)
 
