@@ -52,30 +52,18 @@ object Web3 {
   }
 
   def getBlockTimestampByTransactionHash(transaction_hash: String): String = {
-    var web3: Web3j = getWeb3Instance
+    val web3: Web3j = getWeb3Instance
     try {
-      for (i <- 0 to 3) {
-        val ethTransaction = web3.ethGetTransactionByHash(transaction_hash).send()
-        if (ethTransaction.getTransaction.isPresent) {
-          val transaction = ethTransaction.getTransaction.get()
-          val blockNumber = transaction.getBlockNumber
-          // log content inside blockTimestampCache
-          blockTimestampCache.foreach {
-            case (key, value) => logger.info(s"blockTimestampCache: $key -> $value")
-          }
-          return blockTimestampCache.getOrElseUpdate(blockNumber.toString, {
-            val block = web3
-              .ethGetBlockByNumber(DefaultBlockParameter.valueOf(blockNumber), false)
-              .send()
-            block.getBlock.getTimestamp.toString()
-          })
-        }
-        if (i == 0) {
-          // retry with another provider
-          val providerUrl = PROVIDER_URLS(random.nextInt(PROVIDER_URLS.length))
-          logger.info(s"Retrying with provider url: $providerUrl")
-          web3 = Web3j.build(new HttpService(providerUrl))
-        }
+      val ethTransaction = web3.ethGetTransactionByHash(transaction_hash).send()
+      if (ethTransaction.getTransaction.isPresent) {
+        val transaction = ethTransaction.getTransaction.get()
+        val blockNumber = transaction.getBlockNumber
+        return blockTimestampCache.getOrElseUpdate(blockNumber.toString, {
+          val block = web3
+            .ethGetBlockByNumber(DefaultBlockParameter.valueOf(blockNumber), false)
+            .send()
+          block.getBlock.getTimestamp.toString()
+        })
       }
       throw new RuntimeException(s"Transaction not found: $transaction_hash")
     } catch {
@@ -86,5 +74,6 @@ object Web3 {
         null
     }
   }
+
 
 }

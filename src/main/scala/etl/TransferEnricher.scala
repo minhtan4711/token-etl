@@ -78,10 +78,8 @@ object TransferEnricher extends BaseEnricher {
         "value",
       )
 
-    logger.info("Getting timestamp...")
     val addTransactAtDf = selectedDf
       .withColumn("transact_at", getTimestamp(fixDf("transaction_hash")))
-    logger.info("Getting timestamp done!")
 
     val arangoTransferDf = spark.createDataFrame(addTransactAtDf.rdd, transfersCollectionSchema)
 
