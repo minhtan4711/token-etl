@@ -13,6 +13,9 @@ object Spark {
   val spark: SparkSession = SparkSession.builder
     .appName("PostgresToArangoETL")
     .master("local[8]")
+    .config("spark.executor.instances", "2")
+    .config("spark.executor.cores", "4")
+    .config("spark.executor.memory", "7g")
     .getOrCreate()
 
   // define spark context
