@@ -30,7 +30,7 @@ object TransferEnricher extends BaseEnricher {
 
   private val minBlockNumber = start_block_number
   private val maxBlockNumber = end_block_number
-  private val blockSize = 1000
+  private val blockSize = 5000
 
   private def processBlockRange(startBlockNumber: Int, endBlockNumber: Int): Future[Unit] = Future {
     val query = s"(SELECT * FROM $source " +
@@ -113,7 +113,7 @@ object TransferEnricher extends BaseEnricher {
     val startTime = System.currentTimeMillis()
     logger.info(s"Starting data fetch and enrichment at ${dateFormat.format(new Date())}")
     try {
-      val batchSize = 10
+      val batchSize = 5
       val delayBetweenBatches = 10
 
       val batchedBlockNumbers = (minBlockNumber to maxBlockNumber by blockSize).grouped(batchSize)
