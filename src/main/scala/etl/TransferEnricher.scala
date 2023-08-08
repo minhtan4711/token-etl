@@ -30,20 +30,20 @@ object TransferEnricher extends BaseEnricher {
 
   private val minBlockNumber = start_block_number
   private val maxBlockNumber = end_block_number
-  private val blockSize = 1000
+  private val blockSize = 5000
 
   private def processBlockRange(startBlockNumber: Int, endBlockNumber: Int): Future[Unit] = Future {
+    val query = s"(SELECT * FROM $source " +
+      s"WHERE block_number " +
+      s"BETWEEN $startBlockNumber AND $endBlockNumber) " +
+      s"as tmp"
+
     val partitioningOptions = Map(
       "partitionColumn" -> "block_number",
       "lowerBound" -> s"$startBlockNumber",
       "upperBound" -> s"$endBlockNumber",
       "numPartitions" -> "8",
     )
-
-    val query = s"(SELECT * FROM $source " +
-      s"WHERE block_number " +
-      s"BETWEEN $startBlockNumber AND $endBlockNumber ) " +
-      s"as tmp"
 
     val currentBlockSizeDf = spark
       .read
@@ -88,7 +88,7 @@ object TransferEnricher extends BaseEnricher {
       collectionName = transfersCollection,
       collectionType = transfersCollectionType)
 
-    logger.info(s"Finished processing block number $startBlockNumber to $endBlockNumber")
+    logger.info(s"Finished processing block number $startBlockNumber to $endBlockNumber. Data saved to ArangoDB successfully.")
   }
 
   private def processBlockRangeWithRetry(
@@ -100,7 +100,7 @@ object TransferEnricher extends BaseEnricher {
       case e: Exception =>
         if (maxRetries > 0) {
           logger.warn(s"Failed to process block range $startBlockNumber-$endBlockNumber due to ${e.getMessage}, retrying...")
-          Thread.sleep(1000 * 10) // Wait 10 seconds before retrying
+          Thread.sleep(1000 * 5) // Wait 10 seconds before retrying
           processBlockRangeWithRetry(startBlockNumber, endBlockNumber, maxRetries - 1)
         } else {
           logger.error(s"Failed to process block range $startBlockNumber-$endBlockNumber after $maxRetries retries")
@@ -134,6 +134,8 @@ object TransferEnricher extends BaseEnricher {
           }
           Thread.sleep(3000)
         }
+        logger.info(s"Finished processing batch starting with block number ${batch.head} and ending with block number ${batch.head + batchSize * blockSize - 1}")
+
         // Sleep for a certain duration between batches
         Thread.sleep(delayBetweenBatches * 1000)
         val endTime = System.currentTimeMillis()

@@ -9,7 +9,6 @@ import constants.Time.{AN_HOUR, A_DAY}
 import org.apache.spark.sql.{DataFrame, functions}
 import org.apache.spark.sql.functions.{array, coalesce, col, collect_list, count, countDistinct, explode, expr, first, lag, lit, map, map_concat, map_from_entries, monotonically_increasing_id, struct, sum, udf, when}
 import org.apache.spark.sql.expressions.Window
-import constants.Common.WHALE_THRESHOLD
 import databases.Arango.connection
 import utils.WriteToFile.writeDataFrameToFile
 import utils.CheckAddress.{is_whale_address, is_dapp_address}
@@ -20,40 +19,18 @@ abstract class BaseEnricher extends App {
   protected val spark = Spark.spark
   protected val dotenv = Dotenv.load()
   protected val logger: Logger = Logger(this.getClass)
-  private val dappsCollection = dotenv.get("ARANGODB_DAPPS")
+  private val dappsCollection = "test_dapps"
   private val removePrefix = udf(removeCollectionName _)
   private val isDappAddress = udf(is_dapp_address _)
   private val isWhaleAddress = udf(is_whale_address _)
 
-  protected def enrichTokenInfoDf(): DataFrame = {
-    val getId = udf(Coingecko.getTokenIdFromAddress _)
-    val getName = udf(Coingecko.getNameFromAddress _)
-    val getSymbol = udf(Coingecko.getSymbolFromAddress _)
-    val getLogo = udf(Coingecko.getLogoFromAddress _)
-    val getTotalSupply = udf(Coingecko.getTotalSupply _)
-    val getMaxSupply = udf(Coingecko.getMaxSupply _)
-    val getCirculatingSupply = udf(Coingecko.getCirculatingSupply _)
-
-    val tokenDF = Spark.readFromPostgres(dotenv.get("POSTGRES_TOKENS_DECIMAL_TABLE"))
-
-    tokenDF
-      .withColumn("_key", tokenDF("address"))
-      .withColumn("idCGK", getId(tokenDF("address")))
-      .withColumn("name", getName(tokenDF("address")))
-      .withColumn("symbol", getSymbol(tokenDF("address")))
-      .withColumn("logo", getLogo(tokenDF("address")))
-      .withColumn("totalSupply", getTotalSupply(tokenDF("address")))
-      .withColumn("maxSupply", getMaxSupply(tokenDF("address")))
-      .withColumn("circulatingSupply", getCirculatingSupply(tokenDF("address")))
-      .withColumnRenamed("address", "contract_address")
-      .withColumn("id", monotonically_increasing_id())
-  }
-
-  protected def getDataFromTimeBlock(startTimestamp: Long, endTimestamp: Long): DataFrame = {
+  protected def getDataFromTimeBlock(contract_address: String, startTimestamp: Long, endTimestamp: Long): DataFrame = {
     val queryTransfers =
       s"""
-         |FOR transfer IN transfers
+         |FOR transfer IN test_transfers
          |  FILTER
+         |  transfer.contract_address == "$contract_address"
+         |  AND
          |  TO_NUMBER(transfer.transact_at) >= $startTimestamp
          |  AND
          |  TO_NUMBER(transfer.transact_at) <= $endTimestamp
@@ -81,6 +58,21 @@ abstract class BaseEnricher extends App {
       )
   }
 
+  protected def enrichTokenInfoDf(df: DataFrame): DataFrame = {
+    val invalidAddresses = List(
+      "0xd4cb328a82bdf5f03eb737f37fa6b370aef3e888",
+      "0xf7de7e8a6bd59ed41a4b5fe50278b3b7f31384df"
+    )
+    val filteredDF = df.filter(!col("contract_address").isin(invalidAddresses: _*))
+
+    val enrichedDF = filteredDF
+      .withColumn("_key", df("contract_address"))
+      .withColumn("contract_address", df("contract_address"))
+      .withColumn("id", monotonically_increasing_id())
+
+    enrichedDF
+  }
+
   protected def getDistinctAddressFromDf(df: DataFrame): DataFrame = {
     val fromDf = df.select("_from").withColumnRenamed("_from", "address")
     val toDf = df.select("_to").withColumnRenamed("_to", "address")
@@ -97,10 +89,14 @@ abstract class BaseEnricher extends App {
       .withColumn("hour", (col("transact_at") / AN_HOUR).cast("long"))
     //new
     val fromAddressHourlyTransfers = transfersWithHour
-      .select(col("hour"), col("_from").as("address"), (functions.negate(col("value"))).as("value")) // Mark outgoing transfers as negative
+      .select(
+        col("hour"),
+        col("_from").as("address"),
+        (functions.negate(col("value"))).as("value")
+      )
 
     val toAddressHourlyTransfers = transfersWithHour
-      .select(col("hour"), col("_to").as("address"), col("value")) // Incoming transfers are positive
+      .select(col("hour"), col("_to").as("address"), col("value"))
 
     // Combine both dataframes
     val combinedTransfers = fromAddressHourlyTransfers.union(toAddressHourlyTransfers)
@@ -129,58 +125,6 @@ abstract class BaseEnricher extends App {
 
     val sortedData = finalWalletCumulativeBalance.orderBy("address", "timestamp")
     sortedData
-
-
-    // old
-//    val fromAddressHourlyTransfers = transfersWithHour
-//      .groupBy("hour", "_from")
-//      .agg(sum("value").as("from_value"))
-//
-//
-//    val toAddressHourlyTransfers = transfersWithHour
-//      .groupBy("hour", "_to")
-//      .agg(sum("value").as("to_value"))
-//
-//    val joinedTransfers = fromAddressHourlyTransfers
-//      .join(
-//        toAddressHourlyTransfers,
-//        fromAddressHourlyTransfers("hour") === toAddressHourlyTransfers("hour")
-//          &&
-//        fromAddressHourlyTransfers("_from") === toAddressHourlyTransfers("_to")
-//      )
-//      .drop(fromAddressHourlyTransfers("hour"))
-//
-//    val joinedTransfersWithTimestamp = joinedTransfers
-//      .withColumn("timestamp", (col("hour") * AN_HOUR).cast("long"))
-//      .drop("hour")
-//
-//    val walletHourlyBalance = joinedTransfersWithTimestamp
-//      .withColumn(
-//        "hourly_balance",
-//        col("to_value") - col("from_value")
-//      )
-//
-//    val finalWalletHourlyBalance = walletHourlyBalance
-//      .drop("_from")
-//      .drop("from_value")
-//      .drop("to_value")
-//      .withColumnRenamed("_to", "address")
-//
-//    val window = Window
-//      .partitionBy("address")
-//      .orderBy("timestamp")
-//      .rowsBetween(Window.unboundedPreceding, Window.currentRow)
-//
-//    val finalWalletCumulativeBalance = finalWalletHourlyBalance
-//      .withColumn(
-//        "balance",
-//        sum("hourly_balance")
-//          .over(window)
-//      )
-//      .drop("hourly_balance")
-//
-//    val sortedData = finalWalletCumulativeBalance.orderBy("address", "timestamp")
-//    sortedData
   }
 
   private def calculateBalanceWithWindow(df: DataFrame): DataFrame = {
@@ -215,8 +159,6 @@ abstract class BaseEnricher extends App {
       .groupBy("timestamp")
       .agg(sum("isHolderInt").as(numberOfName))
 
-//    holderCount
-
     val numberOfHolderChangeLogs = holderCount
       .withColumn(
         changeLogName,
@@ -224,13 +166,9 @@ abstract class BaseEnricher extends App {
           col("timestamp").cast("Long").as("key"),
           col(numberOfName).cast("Int").as("value")
         )
-//        map(col("timestamp").cast("Int"), col(numberOfName).cast("Int"))
       )
       .select(collect_list(changeLogName).as(changeLogName))
       .select(map_from_entries(col(changeLogName)).as(changeLogName))
-
-//    val aggregatedNumberOfHolderChangeLogs: DataFrame = numberOfHolderChangeLogs
-//      .agg(collect_list("numberOfHolderChangeLogs").alias(changeLogName))
 
     val numberOfHolderChangeLogsWithIndex: DataFrame = numberOfHolderChangeLogs
       .withColumn("id", monotonically_increasing_id())
@@ -249,12 +187,16 @@ abstract class BaseEnricher extends App {
     )
   }
 
-  protected def getNumberOfWhaleWalletChangeLogs(df: DataFrame, circulatingSupply: Double): DataFrame = {
+  protected def getNumberOfWhaleWalletChangeLogs(
+                                                  df: DataFrame,
+                                                  circulatingSupply: Double,
+                                                  whaleThreshHold: Double
+                                                ): DataFrame = {
     val calculateData = calculateBalance(df)
     val processedData = calculateBalanceWithWindow(calculateData)
     processBalance(
       processedData,
-      circulatingSupply * WHALE_THRESHOLD,
+      circulatingSupply * whaleThreshHold,
       "numberOfWhaleWallet",
       "numberOfWhaleWalletChangeLogs")
   }
@@ -268,7 +210,6 @@ abstract class BaseEnricher extends App {
     val transfersWithTimestamp: DataFrame = transfersPerDay
       .withColumn("date", col("date") * A_DAY)
 
-//    transfersWithTimestamp
     val groupByAverageNumberOfTransactionPerDay = transfersWithTimestamp
       .groupBy("date")
       .sum("count")
@@ -278,8 +219,6 @@ abstract class BaseEnricher extends App {
       .withColumnRenamed("date", "timestamp")
       .withColumn("numberOfTransactionPerDay", (col("numberOfTransactionPerDay") / 24).cast("Int"))
 
-//    averageNumberOfTransactionPerDay
-
     val mapAverageNumberOfTransactionPerDay = averageNumberOfTransactionPerDay
       .withColumn(
         "averageNumberOfTransactionPerDay",
@@ -287,20 +226,12 @@ abstract class BaseEnricher extends App {
           col("timestamp").cast("Long").as("key"),
           col("numberOfTransactionPerDay").cast("Int").as("value")
         )
-//        map(
-//          col("timestamp").cast("Int"),
-//          col("numberOfTransactionPerDay").cast("Int")
-//        )
       )
       .select(collect_list("averageNumberOfTransactionPerDay").as("averageNumberOfTransactionPerDay"))
       .select(map_from_entries(col("averageNumberOfTransactionPerDay")).as("averageNumberOfTransactionPerDay"))
       .withColumn("id", monotonically_increasing_id())
       .drop("timestamp")
       .drop("numberOfTransactionPerDay")
-
-
-//    val collectAverageNumberOfTransactionPerDay = mapAverageNumberOfTransactionPerDay
-//      .agg(collect_list("averageNumberOfTransactionPerDay").alias("averageNumberOfTransactionPerDay"))
 
     mapAverageNumberOfTransactionPerDay
   }
@@ -315,7 +246,6 @@ abstract class BaseEnricher extends App {
       .withColumnRenamed("hour", "timestamp")
       .withColumnRenamed("count", "numberOfTransfer")
 
-//    transactionsByTimestamp
     val transactionsMap = transactionsByTimestamp
       .withColumn("timestamp", col("timestamp") * AN_HOUR)
       .withColumn(
@@ -324,17 +254,11 @@ abstract class BaseEnricher extends App {
           col("timestamp").as("key"),
           col("numberOfTransfer").as("value")
         )
-//        map(col("timestamp").cast("Long"), col("numberOfTransaction").cast("Int"))
       )
       .select(collect_list("numberOfTransferChangeLogs").as("numberOfTransferChangeLogs"))
       .select(map_from_entries(col("numberOfTransferChangeLogs")).as("numberOfTransferChangeLogs"))
       .drop("numberOfTransfer")
       .drop("timestamp")
-
-
-//    val aggregatedTransactions = transactionsMap
-//      .agg(collect_list("numberOfTransferChangeLogs")
-//        .alias("numberOfTransferChangeLogs"))
 
     val transactionsWithIndex = transactionsMap.withColumn("id", monotonically_increasing_id())
     transactionsWithIndex
@@ -453,18 +377,12 @@ abstract class BaseEnricher extends App {
         struct(
           col("timestamp").cast("Long").as("key"),
           col("count").cast("Int").as("value")
-//          struct(
-//            col("count").cast("Int").as("count"),
-//            col("dappInfo")
-//          ).as("value")
         )
       )
       .select(collect_list("numberOfDappChangeLogs").as("numberOfDappChangeLogs"))
       .select(map_from_entries(col("numberOfDappChangeLogs")).as("numberOfDappChangeLogs"))
       .withColumn("id", monotonically_increasing_id())
       .drop("count")
-
-    finalDf.show()
 
     finalDf
   }
@@ -479,6 +397,8 @@ abstract class BaseEnricher extends App {
       .groupBy("hour", "address")
       .count()
 
+
+
     val transferCountWithTimestampDF = transferCountDF
       .withColumn("timestamp", (col("hour") * AN_HOUR).cast("Long"))
       .drop("hour")
@@ -487,8 +407,6 @@ abstract class BaseEnricher extends App {
       .withColumnRenamed("address", "address")
       .withColumn("address", removePrefix(col("address")))
       .withColumnRenamed("count", "numberOfTransfers")
-
-//    numberOfTransferPerAddressInTimestamp.show()
 
     val transferCountWithClusterDF: DataFrame = numberOfTransferPerAddressInTimestamp
       .withColumn(
@@ -502,8 +420,6 @@ abstract class BaseEnricher extends App {
           )
           .otherwise("HIGH")
       )
-
-//    transferCountWithClusterDF.show()
 
     val clusteredAddressesByTimestampDF = transferCountWithClusterDF
       .groupBy("timestamp", "walletCluster")
@@ -538,6 +454,8 @@ abstract class BaseEnricher extends App {
       .select(collect_list("walletClusterByNumberOfTransfer").as("walletClusterByNumberOfTransfer"))
       .select(map_from_entries(col("walletClusterByNumberOfTransfer")).as("walletClusterByNumberOfTransfer"))
       .withColumn("id", monotonically_increasing_id())
+
+    finalDf.show()
 
     finalDf
   }
