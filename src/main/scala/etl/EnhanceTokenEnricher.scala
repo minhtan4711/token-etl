@@ -36,7 +36,7 @@ object EnhanceTokenEnricher extends BaseEnricher {
 
       val numberOfAddressChangeLogsDf = getNumberOfAddressChangeLogs(selectedTransfersDf)
 
-      val numberOfDappChangeLogsDf = getNumberOfDappChangeLogs(selectedTransfersDf)
+      val numberOfDappChangeLogsDf = getNumberOfDappChangeLogs(df = selectedTransfersDf, contract_address = contract_address)
 
       val numberOfHolderChangeLogsDf = getNumberOfHolderChangeLogs(selectedTransfersDf)
 
@@ -80,8 +80,6 @@ object EnhanceTokenEnricher extends BaseEnricher {
       "value",
       "transact_at"
     )
-
-    insertedDf.show()
 
     Spark.saveDf(
       df = insertedDf,
