@@ -325,9 +325,10 @@ abstract class BaseEnricher extends App {
     walletChangesWithIndex
   }
 
-  protected def getNumberOfDappChangeLogs(df: DataFrame): DataFrame = {
+  protected def getNumberOfDappChangeLogs(df: DataFrame, contract_address: String): DataFrame = {
     val removePrefix = udf(removeCollectionName _)
     val dappsDf = Spark.readFromArangoDB(dappsCollection)
+      .filter(col("_key").startsWith(contract_address + "_"))
 
     val fromDf = df
       .withColumn("hour", (col("transact_at") / AN_HOUR).cast("long"))
@@ -352,7 +353,7 @@ abstract class BaseEnricher extends App {
 
     val dappsTransfers = explodedDf
       .join(dappsDfExploded, explodedDf("address_explode") === dappsDfExploded("address_dapp_explode"), "inner")
-      .select("hour", "address", "name", "image")
+      .select("hour", "idCMC", "name", "image")
       .drop("address_explode")
 
     val withDappInfo = dappsTransfers
@@ -363,7 +364,7 @@ abstract class BaseEnricher extends App {
     val groupedByHourWithInfo = withDappInfo.groupBy("hour")
       .agg(
         collect_list("info").as("dappInfo"),
-        count("address").as("count")
+        countDistinct("idCMC").as("count")
       )
 
     val groupedByHourWithInfoTimestamp = groupedByHourWithInfo
